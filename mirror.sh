@@ -87,22 +87,12 @@ mirror() {
     error "$1 is not at the Docker Hub"
   fi
 
+  verbose "Collecting tags matching $MIRROR_TAGS for $1"
   for tag in $(img_tags --filter "$MIRROR_TAGS" -- "$1"); do
     semver=$(printf %s\\n "$tag" | grep -oE '[0-9]+(\.[0-9]+)+')
     if [ "$(img_version "$semver")" -ge "$(img_version "$MIRROR_MINVER")" ]; then
-      # Detect if image present, download if not
       notag=${resolved%:*}
       img="${notag}:$tag"
-      if docker image inspect >/dev/null 2>&1; then
-        rm_img=0
-      else
-        if [ "$MIRROR_DRYRUN" = 1 ]; then
-          verbose "Would pull image $img"
-        else
-          docker image pull "$img"
-        fi
-        rm_img=1
-      fi
 
       # Decide upon name of destination image. When the destination registry has
       # a slash, just use the tail (name) of the image and prepend the registry
@@ -113,6 +103,20 @@ mirror() {
       else
         rootless=${img#*/}
         destimg=${MIRROR_REGISTRY%/}/$rootless
+      fi
+
+      verbose "Mirroring $img to $destimg"
+
+      # Detect if image present, download if not
+      if docker image inspect >/dev/null 2>&1; then
+        rm_img=0
+      else
+        if [ "$MIRROR_DRYRUN" = 1 ]; then
+          verbose "Would pull image $img"
+        else
+          docker image pull "$img"
+        fi
+        rm_img=1
       fi
 
       # Retag downloaded image to be as destination and push
@@ -128,13 +132,13 @@ mirror() {
         if [ "$MIRROR_DRYRUN" = 1 ]; then
           verbose "Would remove image $img"
         else
-          docker image rm "$img"
+          docker image rm -f "$img"
         fi
       fi
       if [ "$MIRROR_DRYRUN" = 1 ]; then
         verbose "Would remove image $destimg"
       else
-        docker image rm "$destimg"
+        docker image rm -f "$destimg"
       fi
     else
       verbose "Discarding version $semver, older than $MIRROR_MINVER"
