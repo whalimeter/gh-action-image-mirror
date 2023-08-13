@@ -1,0 +1,3 @@
+[submodule "reg-tags"]
+	path = reg-tags
+	url = git@github.com:efrecon/reg-tags.git
