@@ -28,7 +28,7 @@ inputs:
     description: |
       Regular expression to match against the tags of source image so they will
       be considered for mirroring.
-    default: "[0-9]+(\.[0-9]+)+$"
+    default: '[0-9]+(\.[0-9]+)+$'
   minver:
     description: |
       Minimal version (extracted from image tag) that the source image must have
