@@ -166,6 +166,9 @@ mirror() {
         fi
       done
 
+      verbose "Pushing manifest $destimg:$tag"
+      docker manifest push "$destimg:$tag"
+
       # Cleanup
       if [ "$MIRROR_DRYRUN" = 1 ]; then
         verbose "Would remove image $destimg:$tag"
