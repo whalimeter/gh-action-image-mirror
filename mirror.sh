@@ -81,6 +81,45 @@ check_command() {
   done
 }
 
+_json_field() {
+  grep -F "\"$1\"" |
+    head -n 1 |
+    sed -E "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\\1/"
+}
+
+platforms() {
+  _arch=
+  _os=
+  _variant=
+  while IFS= read -r line; do
+    case "$line" in
+      *architecture*) _arch=$(printf %s\\n "$line" | _json_field architecture);;
+      *os*) _os=$(printf %s\\n "$line" | _json_field os);;
+      *variant*) _variant=$(printf %s\\n "$line" | _json_field variant);;
+      *"}"*)
+        if [ -n "$_arch" ] && [ -n "$_os" ] && [ -n "$_variant" ]; then
+          printf %s\\n "$_os/$_arch/$_variant"
+        elif [ -n "$_arch" ] && [ -n "$_os" ]; then
+          printf %s\\n "$_os/$_arch"
+        fi
+        _arch=
+        _os=
+        _variant=
+        ;;
+    esac
+  done <<EOF
+$(docker manifest inspect "$1" | grep -E '("(architecture|os|variant)"|})')
+EOF
+}
+
+digests() {
+  while IFS= read -r line; do
+    printf %s\\n "$line" | _json_field digest
+  done <<EOF
+$(docker manifest inspect "$1" | grep -E '"digest"')
+EOF
+}
+
 mirror() {
   resolved=$(img_canonicalize "$1")
   if [ "${resolved%%/*}" != "docker.io" ]; then
@@ -98,47 +137,43 @@ mirror() {
       # a slash, just use the tail (name) of the image and prepend the registry
       # path.
       if printf %s\\n "$MIRROR_REGISTRY" | grep -q '/'; then
-        name=${img##*/}
+        name=${notag##*/}
         destimg=${MIRROR_REGISTRY%/}/$name
       else
-        rootless=${img#*/}
+        rootless=${notag#*/}
         destimg=${MIRROR_REGISTRY%/}/$rootless
       fi
 
-      verbose "Mirroring $img to $destimg"
-
-      # Detect if image present, download if not
-      if docker image inspect >/dev/null 2>&1; then
-        rm_img=0
-      else
+      verbose "Mirroring $img to $destimg:$tag"
+      verbose "Collecting platforms for $img"
+      platforms "$img" | while IFS= read -r platform; do
+        verbose "Fetching $img at $platform"
+        docker image pull --platform "$platform" "$img"
+        platform_id=$(printf %s\\n "$platform" | tr '/' '-')
+        verbose "Pushing $img at $platform as $destimg:${tag}-$platform_id"
+        docker image tag "$img" "$destimg:${tag}-$platform_id"
         if [ "$MIRROR_DRYRUN" = 1 ]; then
-          verbose "Would pull image $img"
+          verbose "Would push image $destimg:${tag}-$platform_id"
         else
-          docker image pull "$img"
+          docker image push "$destimg:${tag}-$platform_id"
         fi
-        rm_img=1
-      fi
 
-      # Retag downloaded image to be as destination and push
-      if [ "$MIRROR_DRYRUN" = 1 ]; then
-        verbose "Would push image $destimg"
-      else
-        docker image tag "$img" "$destimg"
-        docker image push "$destimg"
-      fi
+        if [ "$MIRROR_DRYRUN" = 1 ]; then
+          verbose "Would add $destimg:${tag}-$platform_id to manifest $destimg:$tag"
+        else
+          verbose "Adding $destimg:${tag}-$platform_id to manifest $destimg:$tag"
+          docker manifest create --amend "$destimg:$tag" "$destimg:${tag}-$platform_id"
+        fi
+      done
+
+      verbose "Pushing manifest $destimg:$tag"
+      docker manifest push "$destimg:$tag"
 
       # Cleanup
-      if [ "$rm_img" = 1 ]; then
-        if [ "$MIRROR_DRYRUN" = 1 ]; then
-          verbose "Would remove image $img"
-        else
-          docker image rm -f "$img"
-        fi
-      fi
       if [ "$MIRROR_DRYRUN" = 1 ]; then
-        verbose "Would remove image $destimg"
+        verbose "Would remove image $destimg:$tag"
       else
-        docker image rm -f "$destimg"
+        docker image rm -f "$destimg:$tag"
       fi
     else
       verbose "Discarding version $semver, older than $MIRROR_MINVER"
