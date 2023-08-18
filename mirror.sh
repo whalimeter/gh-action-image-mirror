@@ -15,9 +15,8 @@ MIRROR_TAGS=${MIRROR_TAGS:-'[0-9]+(\.[0-9]+)+$'}
 # Do not perform operation, just print what would be done on stderr
 MIRROR_DRYRUN=${MIRROR_DRYRUN:-0}
 
-# Minimum version that the image at the Hub must have to be downloaded and
-# mirrored.
-MIRROR_MINVER=${MIRROR_MINVER:-"0.0.0"}
+# Colon separated range of versions to mirror, default to all.
+MIRROR_RANGE=${MIRROR_RANGE:-""}
 
 # Verbosity level
 MIRROR_VERBOSE=${MIRROR_VERBOSE:-0}
@@ -34,14 +33,14 @@ usage() {
   exit "${1:-0}"
 }
 
-while getopts "m:nr:t:vh-" opt; do
+while getopts "g:nr:t:vh-" opt; do
   case "$opt" in
     r) # Root of the target registry
       MIRROR_REGISTRY="$OPTARG";;
     t) # Regular expression for tags to mirror
       MIRROR_TAGS="$OPTARG";;
-    m) # Minimum version, older version will not be mirrored
-      MIRROR_MINVER="$OPTARG";;
+    g) # Colon-separated range of versions to mirror, empty (default) for all
+      MIRROR_RANGE="$OPTARG";;
     n) # Do not perform operations
       MIRROR_DRYRUN=1;;
     -) # End of options, everything are the names of the images to mirror
@@ -201,11 +200,32 @@ mirror_images() {
     verbose "Collecting tags matching $MIRROR_TAGS for $1"
     for tag in $(img_tags --filter "$MIRROR_TAGS" -- "$1"); do
       semver=$(printf %s\\n "$tag" | grep -oE '[0-9]+(\.[0-9]+)+')
-      if [ "$(img_version "$semver")" -ge "$(img_version "$MIRROR_MINVER")" ]; then
-        notag=${resolved%:*}
-        mirror "${notag}:$tag"
+      verint=$(img_version "$semver")
+      img=${resolved%:*}:${tag}
+      if [ -n "$MIRROR_MINVER" ]; then
+        if [ -n "$MIRROR_MAXVER" ]; then
+          if [ "$verint" -ge "$(img_version "$MIRROR_MINVER")" ] && [ "$verint" -lt "$(img_version "$MIRROR_MAXVER")" ]; then
+            mirror "$img"
+          else
+            verbose "Discarding version $semver, older than $MIRROR_MINVER or newer than $MIRROR_MAXVER"
+          fi
+        else
+          if [ "$verint" -ge "$(img_version "$MIRROR_MINVER")" ]; then
+            mirror "$img"
+          else
+            verbose "Discarding version $semver, older than $MIRROR_MINVER"
+          fi
+        fi
       else
-        verbose "Discarding version $semver, older than $MIRROR_MINVER"
+        if [ -n "$MIRROR_MAXVER" ]; then
+          if [ "$verint" -lt "$(img_version "$MIRROR_MAXVER")" ]; then
+            mirror "$img"
+          else
+            verbose "Discarding version $semver, newer than $MIRROR_MAXVER"
+          fi
+        else
+          mirror "$img"
+        fi
       fi
     done
   fi
@@ -218,7 +238,19 @@ mirror_images() {
 # Verify we have the docker client
 check_command docker
 
+# Detect min and max versions to mirror
+MIRROR_MINVER=
+MIRROR_MAXVER=
+if [ -n "$MIRROR_RANGE" ]; then
+  if printf %s\\n "$MIRROR_RANGE" | grep -qF ':'; then
+    MIRROR_MINVER=${MIRROR_RANGE%:*}
+    MIRROR_MAXVER=${MIRROR_RANGE#*:}
+  else
+    MIRROR_MINVER=$MIRROR_RANGE
+  fi
+fi
+
 while [ "$#" -gt 0 ]; do
-  mirror "$1"
+  mirror_images "$1"
   shift
 done
