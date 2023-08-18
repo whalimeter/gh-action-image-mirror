@@ -121,82 +121,94 @@ EOF
 }
 
 mirror() {
+  notag=${1%:*}
+  tag=${1##*:}
+
+  # Decide upon name of destination image. When the destination registry has
+  # a slash, just use the tail (name) of the image and prepend the registry
+  # path.
+  if printf %s\\n "$MIRROR_REGISTRY" | grep -qF '/'; then
+    name=${notag##*/}
+    destimg=${MIRROR_REGISTRY%/}/$name
+  else
+    rootless=${notag#*/}
+    destimg=${MIRROR_REGISTRY%/}/$rootless
+  fi
+
+  verbose "Mirroring $1 to $destimg:$tag"
+
+  verbose "Discovering platforms for ${1}..."
+  _manifest=$(mktemp -t manifest.XXXXXX)
+  docker manifest inspect "$1" > "$_manifest"
+
+  if grep -qF 'distribution.manifest.list' "$_manifest"; then
+    verbose "$1 is a multi-platform image, pushing one platform at a time"
+    platforms "$1" < "$_manifest" | while IFS= read -r platform; do
+      verbose "Fetching $1 at $platform"
+      docker image pull --platform "$platform" "$1"
+      platform_id=$(printf %s\\n "$platform" | tr '/' '-')
+      verbose "Pushing $1 at $platform as $destimg:${tag}-$platform_id"
+      docker image tag "$1" "$destimg:${tag}-$platform_id"
+      if [ "$MIRROR_DRYRUN" = 1 ]; then
+        verbose "Would push image $destimg:${tag}-$platform_id"
+      else
+        docker image push "$destimg:${tag}-$platform_id"
+      fi
+
+      if [ "$MIRROR_DRYRUN" = 1 ]; then
+        verbose "Would add $destimg:${tag}-$platform_id to manifest $destimg:$tag"
+      else
+        verbose "Adding $destimg:${tag}-$platform_id to manifest $destimg:$tag"
+        docker manifest create --amend "$destimg:$tag" "$destimg:${tag}-$platform_id"
+      fi
+    done
+
+    verbose "Pushing manifest $destimg:$tag"
+    docker manifest push "$destimg:$tag"
+  else
+    verbose "$1 is a single-platform image"
+    docker image pull "$1"
+    docker image tag "$1" "$destimg:$tag"
+    if [ "$MIRROR_DRYRUN" = 1 ]; then
+      verbose "Would push image $destimg:$tag"
+    else
+      verbose "Pushing image $destimg:$tag"
+      docker image push "$destimg:$tag"
+    fi
+  fi
+
+  # Cleanup
+  rm -f "$_manifest"
+  if [ "$MIRROR_DRYRUN" = 1 ]; then
+    verbose "Would remove image $destimg:$tag"
+  else
+    docker image rm -f "$destimg:$tag"
+  fi
+}
+
+mirror_images() {
   resolved=$(img_canonicalize "$1")
   if [ "${resolved%%/*}" != "docker.io" ]; then
     error "$1 is not at the Docker Hub"
   fi
 
-  verbose "Collecting tags matching $MIRROR_TAGS for $1"
-  for tag in $(img_tags --filter "$MIRROR_TAGS" -- "$1"); do
-    semver=$(printf %s\\n "$tag" | grep -oE '[0-9]+(\.[0-9]+)+')
-    if [ "$(img_version "$semver")" -ge "$(img_version "$MIRROR_MINVER")" ]; then
-      notag=${resolved%:*}
-      img="${notag}:$tag"
+  rootimg=${1##*/}
+  tag=${rootimg#*:}
 
-      # Decide upon name of destination image. When the destination registry has
-      # a slash, just use the tail (name) of the image and prepend the registry
-      # path.
-      if printf %s\\n "$MIRROR_REGISTRY" | grep -q '/'; then
-        name=${notag##*/}
-        destimg=${MIRROR_REGISTRY%/}/$name
+  if printf %s\\n "$rootimg" | grep -Fq ':'; then
+    mirror "$1"
+  else
+    verbose "Collecting tags matching $MIRROR_TAGS for $1"
+    for tag in $(img_tags --filter "$MIRROR_TAGS" -- "$1"); do
+      semver=$(printf %s\\n "$tag" | grep -oE '[0-9]+(\.[0-9]+)+')
+      if [ "$(img_version "$semver")" -ge "$(img_version "$MIRROR_MINVER")" ]; then
+        notag=${resolved%:*}
+        mirror "${notag}:$tag"
       else
-        rootless=${notag#*/}
-        destimg=${MIRROR_REGISTRY%/}/$rootless
+        verbose "Discarding version $semver, older than $MIRROR_MINVER"
       fi
-
-      verbose "Mirroring $img to $destimg:$tag"
-
-      verbose "Discovering platforms for ${img}..."
-      _manifest=$(mktemp -t manifest.XXXXXX)
-      docker manifest inspect "$img" > "$_manifest"
-
-      if grep -qF 'distribution.manifest.list' "$_manifest"; then
-        verbose "$img is a multi-platform image, pushing one platform at a time"
-        platforms "$img" < "$_manifest" | while IFS= read -r platform; do
-          verbose "Fetching $img at $platform"
-          docker image pull --platform "$platform" "$img"
-          platform_id=$(printf %s\\n "$platform" | tr '/' '-')
-          verbose "Pushing $img at $platform as $destimg:${tag}-$platform_id"
-          docker image tag "$img" "$destimg:${tag}-$platform_id"
-          if [ "$MIRROR_DRYRUN" = 1 ]; then
-            verbose "Would push image $destimg:${tag}-$platform_id"
-          else
-            docker image push "$destimg:${tag}-$platform_id"
-          fi
-
-          if [ "$MIRROR_DRYRUN" = 1 ]; then
-            verbose "Would add $destimg:${tag}-$platform_id to manifest $destimg:$tag"
-          else
-            verbose "Adding $destimg:${tag}-$platform_id to manifest $destimg:$tag"
-            docker manifest create --amend "$destimg:$tag" "$destimg:${tag}-$platform_id"
-          fi
-        done
-
-        verbose "Pushing manifest $destimg:$tag"
-        docker manifest push "$destimg:$tag"
-      else
-        verbose "$img is a single-platform image"
-        docker image pull "$img"
-        docker image tag "$img" "$destimg:$tag"
-        if [ "$MIRROR_DRYRUN" = 1 ]; then
-          verbose "Would push image $destimg:$tag"
-        else
-          verbose "Pushing image $destimg:$tag"
-          docker image push "$destimg:$tag"
-        fi
-      fi
-
-      # Cleanup
-      rm -f "$_manifest"
-      if [ "$MIRROR_DRYRUN" = 1 ]; then
-        verbose "Would remove image $destimg:$tag"
-      else
-        docker image rm -f "$destimg:$tag"
-      fi
-    else
-      verbose "Discarding version $semver, older than $MIRROR_MINVER"
-    fi
-  done
+    done
+  fi
 }
 
 # Source Docker Hub image API library
