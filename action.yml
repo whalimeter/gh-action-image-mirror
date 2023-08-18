@@ -10,7 +10,8 @@ branding:
 inputs:
   image:
     description: |
-      The name of the image to mirror, e.g. alpine, or efrecon/reg-tags
+      The name of the image to mirror, e.g. alpine, or efrecon/reg-tags. When a
+      tag is specified, the inputs `tags`, `minver` and `maxver` are ignored.
     required: true
   registry:
     description: |
@@ -27,13 +28,21 @@ inputs:
   tags:
     description: |
       Regular expression to match against the tags of source image so they will
-      be considered for mirroring.
+      be considered for mirroring. Only used when `image` does not contain a
+      tag.
     default: '[0-9]+(\.[0-9]+)+$'
   minver:
     description: |
       Minimal version (extracted from image tag) that the source image must have
-      to be considered for mirroring.
-    default: 0
+      to be considered for mirroring. Only used when `image` does not contain a
+      tag.
+    default: ""
+  maxver:
+    description: |
+      Maximum version (extracted from image tag) that the source image must have
+      to be considered for mirroring. Only used when `image` does not contain a
+      tag.
+    default: ""
 
 runs:
   using: composite
@@ -45,7 +54,7 @@ runs:
       run: |
         ${{ github.action_path }}/mirror.sh \
           -t '${{ inputs.tags }}' \
-          -m '${{ inputs.minver }}' \
+          -g '${{ inputs.minver }}:${{ inputs.maxver }}' \
           -r '${{ inputs.registry }}' \
           -v \
           ${{ inputs.options }} \
