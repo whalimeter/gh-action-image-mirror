@@ -200,9 +200,6 @@ mirror() {
 
 mirror_images() {
   resolved=$(img_canonicalize "$1")
-  if [ "${resolved%%/*}" != "docker.io" ]; then
-    error "$1 is not at the Docker Hub"
-  fi
 
   rootimg=${1##*/}
   tag=${rootimg#*:}
