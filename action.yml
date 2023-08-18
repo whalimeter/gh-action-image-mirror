@@ -1,7 +1,7 @@
 name: Docker Hub Mirror
 description: |
-  Mirror images from the Docker Hub to another registry. The images can be
-  rerouted if necessary.
+  Mirror images from, e.g. the Docker Hub to another registry. The destination
+  images can be rerooted if necessary.
 author: Emmanuel Frecon <efrecon+github@gmail.com>
 branding:
   icon: upload
@@ -16,13 +16,13 @@ inputs:
   registry:
     description: |
       The path of the destination registry. The default is to pick the GHCR and
-      reroute under the repository.
+      reroot under the repository.
     default: ghcr.io/${{ github.repository }}
   options:
     description: |
-      Additional options to `mirror.sh` script, e.g. -v to print out
-      additional verbose information. This is a semi-internal input and should
-      only be used for debugging.
+      Additional options to `mirror.sh` script, e.g. -f to force re-creation of
+      destination images that would already exist. This is a semi-internal input
+      and should only be used for debugging.
     required: false
     default: ""
   tags:
