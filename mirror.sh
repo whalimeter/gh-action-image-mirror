@@ -43,7 +43,7 @@ while getopts "g:nr:t:vh-" opt; do
       MIRROR_RANGE="$OPTARG";;
     n) # Do not perform operations
       MIRROR_DRYRUN=1;;
-    -) # End of options, everything are the names of the images to mirror
+    -) # End of options, everything after are the names of the images to mirror
       break;;
     v) # Turn on verbosity, will otherwise log on errors/warnings only
       MIRROR_VERBOSE=1;;
@@ -135,6 +135,12 @@ mirror() {
   fi
 
   verbose "Mirroring $1 to $destimg:$tag"
+
+  trace "Verifying image $destimg:$tag does not exist"
+  if docker manifest inspect "$destimg:$tag" >/dev/null 2>&1; then
+    verbose "Image $destimg:$tag already exists, skipping"
+    return
+  fi
 
   verbose "Discovering platforms for ${1}..."
   _manifest=$(mktemp -t manifest.XXXXXX)
