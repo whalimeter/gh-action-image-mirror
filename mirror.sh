@@ -18,6 +18,9 @@ MIRROR_DRYRUN=${MIRROR_DRYRUN:-0}
 # Colon separated range of versions to mirror, default to all.
 MIRROR_RANGE=${MIRROR_RANGE:-""}
 
+# Force mirror even if the image already exists in the target registry
+MIRROR_FORCE=${MIRROR_FORCE:-0}
+
 # Verbosity level
 MIRROR_VERBOSE=${MIRROR_VERBOSE:-0}
 
@@ -33,7 +36,7 @@ usage() {
   exit "${1:-0}"
 }
 
-while getopts "g:nr:t:vh-" opt; do
+while getopts "fg:nr:t:vh-" opt; do
   case "$opt" in
     r) # Root of the target registry
       MIRROR_REGISTRY="$OPTARG";;
@@ -41,6 +44,8 @@ while getopts "g:nr:t:vh-" opt; do
       MIRROR_TAGS="$OPTARG";;
     g) # Colon-separated range of versions to mirror, empty (default) for all
       MIRROR_RANGE="$OPTARG";;
+    f) # Force mirror even if the image already exists in the target registry
+      MIRROR_FORCE=1;;
     n) # Do not perform operations
       MIRROR_DRYRUN=1;;
     -) # End of options, everything after are the names of the images to mirror
@@ -136,10 +141,12 @@ mirror() {
 
   verbose "Mirroring $1 to $destimg:$tag"
 
-  trace "Verifying image $destimg:$tag does not exist"
-  if docker manifest inspect "$destimg:$tag" >/dev/null 2>&1; then
-    verbose "Image $destimg:$tag already exists, skipping"
-    return
+  if [ "$MIRROR_FORCE" = 0 ]; then
+    verbose "Verifying image $destimg:$tag does not exist"
+    if docker manifest inspect "$destimg:$tag" >/dev/null 2>&1; then
+      verbose "Image $destimg:$tag already exists, skipping"
+      return
+    fi
   fi
 
   verbose "Discovering platforms for ${1}..."
