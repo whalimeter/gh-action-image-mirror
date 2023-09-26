@@ -43,7 +43,7 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: alpine
-        uses: efrecon/gh-action-docker-mirror@main
+        uses: whalimeter/gh-action-image-mirror@main
         with:
           image: alpine
           minver: "3.18"
